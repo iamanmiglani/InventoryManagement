@@ -182,22 +182,25 @@ def main():
         if subset.empty:
             st.error("No data available for the selected combination.")
         else:
-            # Get forecasted demand for the target (last) day using our new function
+            # Get forecasted demand for the target (last) day using our helper function
             forecasted_demand = get_forecasted_demand(data, store_id, product_id, region)
             if forecasted_demand is None:
                 st.error("Forecast could not be generated.")
             else:
                 # Use the last row of the filtered data as the target record
                 target_row = subset.iloc[-1].copy()
-                target_row['DemandForecast'] = forecasted_demand
-                target_row['ReorderQuantity'] = compute_reorder(target_row['InventoryLevel'], target_row['DemandForecast'])
+                target_row['Forecasted Demand'] = forecasted_demand
+                target_row['Reorder Quantity'] = compute_reorder(target_row['InventoryLevel'], forecasted_demand)
                 
                 st.subheader("Optimized Inventory for Forecast Day")
-                # Convert the record to a DataFrame for styling
-                df_inv = pd.DataFrame([target_row])
-                # Highlight the ReorderQuantity column
-                df_inv_styled = df_inv.style.applymap(lambda v: 'background-color: yellow; font-weight: bold;', subset=['ReorderQuantity'])
-                st.dataframe(df_inv_styled)
+                # Display results vertically (key-value pairs)
+                st.markdown(f"**Date:** {target_row['Date']}")
+                st.markdown(f"**Store ID:** {target_row['StoreID']}")
+                st.markdown(f"**Product ID:** {target_row['ProductID']}")
+                st.markdown(f"**Region:** {target_row['Region']}")
+                st.markdown(f"**Inventory Level:** {target_row['InventoryLevel']}")
+                st.markdown(f"**Forecasted Demand:** {target_row['Forecasted Demand']:.2f}")
+                st.markdown(f"**Reorder Quantity:** **{target_row['Reorder Quantity']}**")
     
     elif module == "Dynamic Pricing":
         st.header("Dynamic Pricing for Forecast Day")
@@ -216,14 +219,17 @@ def main():
                     st.error("Forecast could not be generated.")
                 else:
                     target_row = subset.iloc[-1].copy()
-                    target_row['DemandForecast'] = forecasted_demand
-                    target_row['DynamicPrice'] = dynamic_price(target_row['Price'], target_row['InventoryLevel'], target_row['DemandForecast'])
+                    target_row['Forecasted Demand'] = forecasted_demand
+                    target_row['Dynamic Price'] = dynamic_price(target_row['Price'], target_row['InventoryLevel'], forecasted_demand)
                     
                     st.subheader("Dynamic Pricing for Forecast Day")
-                    df_price = pd.DataFrame([target_row])
-                    # Highlight the DynamicPrice column
-                    df_price_styled = df_price.style.applymap(lambda v: 'background-color: lightgreen; font-weight: bold;', subset=['DynamicPrice'])
-                    st.dataframe(df_price_styled)
+                    st.markdown(f"**Date:** {target_row['Date']}")
+                    st.markdown(f"**Store ID:** {target_row['StoreID']}")
+                    st.markdown(f"**Product ID:** {target_row['ProductID']}")
+                    st.markdown(f"**Region:** {target_row['Region']}")
+                    st.markdown(f"**Current Price:** {target_row['Price']}")
+                    st.markdown(f"**Forecasted Demand:** {target_row['Forecasted Demand']:.2f}")
+                    st.markdown(f"**Dynamic Price:** **{target_row['Dynamic Price']:.2f}**")
     
     elif module == "Reinforcement Learning":
         st.header("Reinforcement Learning Simulation")
