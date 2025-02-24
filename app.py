@@ -11,7 +11,7 @@ import plotly.express as px
 @st.cache_data(show_spinner=False)
 def load_data(file_path):
     data = pd.read_csv(file_path)
-    # Adjust date parsing as needed; here we assume dates might be in dd-mm-yyyy format
+    # Parse dates assuming format is dd-mm-yyyy; adjust if needed.
     data['Date'] = pd.to_datetime(data['Date'], dayfirst=True)
     return data
 
@@ -23,7 +23,7 @@ def forecast_demand(data, store_id, product_id, region, periods=7):
     if subset.empty:
         st.error("No data available for the selected combination.")
         return None, None
-    # Prepare data for Prophet: columns 'ds' (date) and 'y' (UnitsSold)
+    # Prepare data for Prophet: 'ds' for date, 'y' for UnitsSold
     df_forecast = subset[['Date', 'UnitsSold']].rename(columns={'Date': 'ds', 'UnitsSold': 'y'})
     df_forecast['ds'] = pd.to_datetime(df_forecast['ds'])
     
@@ -85,7 +85,7 @@ def run_rl_simulation(episodes=1000, days_per_episode=30, demand_mean=20):
         return inventory_levels.index(inv)
     
     for episode in range(episodes):
-        inventory = 50  # Reset starting inventory for each episode
+        inventory = 50  # Reset starting inventory each episode
         for day in range(days_per_episode):
             state_idx = get_state_index(inventory)
             if random.random() < epsilon:
@@ -106,7 +106,7 @@ def run_rl_simulation(episodes=1000, days_per_episode=30, demand_mean=20):
 def main():
     st.title("Agentic AI for Retail Inventory Management - V3")
     
-    # Load the dataset from the 'data' folder in your repository
+    # Load dataset from the 'data' folder
     data_file = "data/inventory_data.csv"
     data = load_data(data_file)
     
@@ -128,27 +128,33 @@ def main():
                 st.subheader("Forecast Table")
                 st.dataframe(forecast[['ds', 'yhat', 'yhat_lower', 'yhat_upper']].tail(periods))
                 
-                # Determine last date from historical data
+                # Determine the last historical date from the training data
                 last_date = hist_data['ds'].max()
-                # Create a column to distinguish historical vs forecasted values
+                # Label each forecast row as 'Historical' or 'Forecast'
                 forecast['Type'] = np.where(forecast['ds'] > last_date, 'Forecast', 'Historical')
                 
                 st.subheader("Forecast Chart")
                 fig = px.line(
-                forecast,
-                x='ds',
-                y='yhat',
-                color='Type',
-                color_discrete_map={"Historical": "blue", "Forecast": "#00FF00"},
-                title='Forecasted Demand (Historical vs. Forecast)',
-                labels={'ds': 'Date', 'yhat': 'Units Sold (Predicted)'}
+                    forecast,
+                    x='ds',
+                    y='yhat',
+                    color='Type',
+                    color_discrete_map={"Historical": "blue", "Forecast": "#00FF00"},
+                    title='Forecasted Demand (Historical vs. Forecast)',
+                    labels={'ds': 'Date', 'yhat': 'Units Sold (Predicted)'}
                 )
+                
+                # Update the forecast trace to use a dashed line style
+                for trace in fig.data:
+                    if "Forecast" in trace.name:
+                        trace.update(line=dict(dash="dash"))
+                        
                 st.plotly_chart(fig)
-            
+    
     elif module == "Inventory Optimization":
         st.header("Inventory Optimization")
         st.write("For the selected store, product, and region, compute reorder quantities based on current inventory and forecasted demand.")
-        # Filter the data for the selected parameters
+        # Filter data for the selected parameters
         subset = data[(data['StoreID'] == store_id) & 
                       (data['ProductID'] == product_id) & 
                       (data['Region'] == region)]
@@ -170,7 +176,7 @@ def main():
     elif module == "Dynamic Pricing":
         st.header("Dynamic Pricing")
         st.write("For the selected store, product, and region, dynamic pricing is computed based on inventory vs. forecasted demand.")
-        # Filter the data for the selected parameters
+        # Filter data for the selected parameters
         subset = data[(data['StoreID'] == store_id) & 
                       (data['ProductID'] == product_id) & 
                       (data['Region'] == region)]
