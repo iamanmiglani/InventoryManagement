@@ -12,7 +12,9 @@ import datetime
 @st.cache_data(show_spinner=False)
 def load_data(file_path):
     data = pd.read_csv(file_path)
-    data['Date'] = pd.to_datetime(data['Date'])
+    # data['Date'] = pd.to_datetime(data['Date'])
+    data['Date'] = pd.to_datetime(data['Date'], dayfirst=True)
+
     return data
 
 @st.cache_data(show_spinner=False)
