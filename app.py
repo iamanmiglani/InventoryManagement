@@ -16,7 +16,7 @@ def forecast_demand(data, store_id, product_id, region, periods=7):
         return None
     # Prepare data for Prophet (columns 'ds' and 'y')
     df_forecast = subset[['Date', 'UnitsSold']].rename(columns={'Date': 'ds', 'UnitsSold': 'y'})
-    df_forecast['ds'] = pd.to_datetime(df_forecast['ds'])
+    df_forecast['ds'] = pd.to_datetime(df_forecast['ds'], dayfirst=True)
     
     model = Prophet()
     model.fit(df_forecast)
@@ -100,7 +100,7 @@ def main():
     # Load the dataset from the 'data' folder in the repository
     data_file = "data/inventory_data.csv"
     data = pd.read_csv(data_file)
-    data['Date'] = pd.to_datetime(data['Date'])
+    data['Date'] = pd.to_datetime(data['Date'], dayfirst=True)
     
     # Sidebar navigation for selecting modules
     st.sidebar.title("Modules")
