@@ -4,6 +4,7 @@ import numpy as np
 import random
 from prophet import Prophet
 import plotly.express as px
+import plotly.graph_objects as go
 
 # ---------------------------
 # Utility Functions with Caching
@@ -11,7 +12,7 @@ import plotly.express as px
 @st.cache_data(show_spinner=False)
 def load_data(file_path):
     data = pd.read_csv(file_path)
-    # Parse dates assuming format is dd-mm-yyyy; adjust if needed.
+    # Parse dates assuming dd-mm-yyyy format; adjust as needed.
     data['Date'] = pd.to_datetime(data['Date'], dayfirst=True)
     return data
 
@@ -23,7 +24,7 @@ def forecast_demand(data, store_id, product_id, region, periods=7):
     if subset.empty:
         st.error("No data available for the selected combination.")
         return None, None
-    # Prepare data for Prophet: 'ds' for date, 'y' for UnitsSold
+    # Prepare data for Prophet: rename columns to 'ds' and 'y'
     df_forecast = subset[['Date', 'UnitsSold']].rename(columns={'Date': 'ds', 'UnitsSold': 'y'})
     df_forecast['ds'] = pd.to_datetime(df_forecast['ds'])
     
@@ -114,7 +115,7 @@ def main():
     module = st.sidebar.selectbox("Choose a module", 
                                   ["Forecasting", "Inventory Optimization", "Dynamic Pricing", "Reinforcement Learning"])
     
-    # Select common filtering parameters for forecast, optimization, and pricing
+    # Common filtering parameters for forecast, optimization, and pricing
     store_id = st.sidebar.selectbox("Select Store", sorted(data['StoreID'].unique()))
     product_id = st.sidebar.selectbox("Select Product", sorted(data['ProductID'].unique()))
     region = st.sidebar.selectbox("Select Region", sorted(data['Region'].unique()))
@@ -128,27 +129,39 @@ def main():
                 st.subheader("Forecast Table")
                 st.dataframe(forecast[['ds', 'yhat', 'yhat_lower', 'yhat_upper']].tail(periods))
                 
-                # Determine the last historical date from the training data
+                # Get the last historical date from the training data
                 last_date = hist_data['ds'].max()
-                # Label each forecast row as 'Historical' or 'Forecast'
+                # Label each row as either 'Historical' or 'Forecast'
                 forecast['Type'] = np.where(forecast['ds'] > last_date, 'Forecast', 'Historical')
                 
-                st.subheader("Forecast Chart")
-                fig = px.line(
-                    forecast,
-                    x='ds',
-                    y='yhat',
-                    color='Type',
-                    color_discrete_map={"Historical": "blue", "Forecast": "#00FF00"},
-                    title='Forecasted Demand (Historical vs. Forecast)',
-                    labels={'ds': 'Date', 'yhat': 'Units Sold (Predicted)'}
-                )
+                # Split the forecast data into historical and forecast parts
+                hist_df = forecast[forecast['Type'] == 'Historical']
+                fcst_df = forecast[forecast['Type'] == 'Forecast']
+                # To join the lines seamlessly, add the last historical point to fcst_df
+                if not fcst_df.empty:
+                    last_hist = hist_df.iloc[-1:]
+                    fcst_df = pd.concat([last_hist, fcst_df], ignore_index=True)
                 
-                # Update the forecast trace to use a dashed line style
-                for trace in fig.data:
-                    if "Forecast" in trace.name:
-                        trace.update(line=dict(dash="dash"))
-                        
+                st.subheader("Forecast Chart")
+                # Create continuous traces for historical and forecast data using Plotly Graph Objects
+                fig = go.Figure()
+                fig.add_trace(go.Scatter(
+                    x=hist_df['ds'],
+                    y=hist_df['yhat'],
+                    mode='lines',
+                    name='Historical',
+                    line=dict(color='blue', dash='solid')
+                ))
+                if not fcst_df.empty:
+                    fig.add_trace(go.Scatter(
+                        x=fcst_df['ds'],
+                        y=fcst_df['yhat'],
+                        mode='lines',
+                        name='Forecast',
+                        line=dict(color='#00FF00', dash='dash')
+                    ))
+                fig.update_layout(title='Forecasted Demand (Historical Joined with Forecast)',
+                                  xaxis_title='Date', yaxis_title='Units Sold (Predicted)')
                 st.plotly_chart(fig)
     
     elif module == "Inventory Optimization":
