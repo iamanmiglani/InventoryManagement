@@ -7,18 +7,24 @@ import plotly.express as px
 import datetime
 
 # ---------------------------
-# Module 1: Time Series Demand Forecasting
+# Utility Functions with Caching
 # ---------------------------
+@st.cache_data(show_spinner=False)
+def load_data(file_path):
+    data = pd.read_csv(file_path)
+    data['Date'] = pd.to_datetime(data['Date'])
+    return data
+
+@st.cache_data(show_spinner=False)
 def forecast_demand(data, store_id, product_id, region, periods=7):
-    subset = data[(data['StoreID'] == store_id) & (data['ProductID'] == product_id) & (data['Region'] == region)]
+    subset = data[(data['StoreID'] == store_id) & 
+                  (data['ProductID'] == product_id) & 
+                  (data['Region'] == region)]
     if subset.empty:
-        st.write("No data available for the selected combination.")
+        st.error("No data available for the selected combination.")
         return None
-    # Prepare data for Prophet (columns 'ds' and 'y')
     df_forecast = subset[['Date', 'UnitsSold']].rename(columns={'Date': 'ds', 'UnitsSold': 'y'})
-    df_forecast['ds'] = pd.to_datetime(df_forecast['ds'], dayfirst=True)
-    
-    model = Prophet()
+    model = Prophet(daily_seasonality=True)
     model.fit(df_forecast)
     future = model.make_future_dataframe(periods=periods)
     forecast = model.predict(future)
@@ -30,36 +36,36 @@ def forecast_demand(data, store_id, product_id, region, periods=7):
 def compute_reorder(inventory_level, demand_forecast, safety_stock=5):
     if inventory_level < demand_forecast:
         return (demand_forecast - inventory_level) + safety_stock
-    else:
-        return 0
+    return 0
 
 # ---------------------------
 # Module 3: Dynamic Pricing
 # ---------------------------
 def dynamic_price(current_price, inventory_level, demand_forecast):
+    if demand_forecast <= 0:
+        return current_price
     if inventory_level < 0.5 * demand_forecast:
         return current_price * 1.10
     elif inventory_level > 1.5 * demand_forecast:
         return current_price * 0.95
-    else:
-        return current_price
+    return current_price
 
 # ---------------------------
-# Module 5: Reinforcement Learning (Q-Learning Simulation)
+# Module 5: Reinforcement Learning (RL) Simulation
 # ---------------------------
-def run_rl_simulation(episodes=1000, days_per_episode=30):
+@st.cache_data(show_spinner=False)
+def run_rl_simulation(episodes=1000, days_per_episode=30, demand_mean=20):
     max_inventory = 100
     inventory_levels = list(range(0, max_inventory + 1, 5))
     actions = [0, 5, 10, 15]
-    demand_mean = 20
     
-    def simulate_day(inventory, order_qty, demand_mean=demand_mean):
-        inventory += order_qty
+    def simulate_day(inventory, order_qty):
+        inventory += order_qty  # New stock arrives
         demand = np.random.poisson(demand_mean)
         sales = min(inventory, demand)
         new_inventory = inventory - sales
         revenue = sales * 10      # Sale price per unit
-        order_cost = order_qty * 5  # Cost per unit ordered
+        order_cost = order_qty * 5  # Ordering cost per unit
         holding_cost = new_inventory * 0.1  # Holding cost per unit
         reward = revenue - order_cost - holding_cost
         return new_inventory, reward
@@ -76,7 +82,7 @@ def run_rl_simulation(episodes=1000, days_per_episode=30):
         return inventory_levels.index(inv)
     
     for episode in range(episodes):
-        inventory = 50  # Starting inventory
+        inventory = 50  # Reset starting inventory each episode
         for day in range(days_per_episode):
             state_idx = get_state_index(inventory)
             if random.random() < epsilon:
@@ -87,7 +93,7 @@ def run_rl_simulation(episodes=1000, days_per_episode=30):
             new_inventory, reward = simulate_day(inventory, order_qty)
             new_state_idx = get_state_index(new_inventory)
             best_next_action = np.max(Q[new_state_idx])
-            Q[state_idx, action_idx] = Q[state_idx, action_idx] + alpha * (reward + gamma * best_next_action - Q[state_idx, action_idx])
+            Q[state_idx, action_idx] += alpha * (reward + gamma * best_next_action - Q[state_idx, action_idx])
             inventory = new_inventory
     return Q
 
@@ -95,15 +101,13 @@ def run_rl_simulation(episodes=1000, days_per_episode=30):
 # Main Streamlit App
 # ---------------------------
 def main():
-    st.title("Agentic AI for Retail Inventory Management")
+    st.title("Agentic AI for Retail Inventory Management - V2")
     
-    # Load the dataset from the 'data' folder in the repository
+    # Load the dataset from the 'data' folder in your repository
     data_file = "data/inventory_data.csv"
-    data = pd.read_csv(data_file)
-    data['Date'] = pd.to_datetime(data['Date'], dayfirst=True)
+    data = load_data(data_file)
     
-    # Sidebar navigation for selecting modules
-    st.sidebar.title("Modules")
+    st.sidebar.header("Modules")
     module = st.sidebar.selectbox("Choose a module", 
                                   ["Forecasting", "Inventory Optimization", "Dynamic Pricing", "Reinforcement Learning"])
     
@@ -124,7 +128,6 @@ def main():
     elif module == "Inventory Optimization":
         st.header("Inventory Optimization")
         st.write("Computed Reorder Quantities Based on Current Inventory vs. Forecasted Demand")
-        # For demonstration, if DemandForecast is not in the dataset, assume it equals UnitsSold
         if 'DemandForecast' not in data.columns:
             data['DemandForecast'] = data['UnitsSold']
         data['ReorderQuantity'] = data.apply(lambda row: compute_reorder(row['InventoryLevel'], row['DemandForecast']), axis=1)
@@ -145,9 +148,10 @@ def main():
     
     elif module == "Reinforcement Learning":
         st.header("Reinforcement Learning Simulation")
-        st.write("Simulating Q-learning for Inventory Ordering Decisions")
         episodes = st.slider("Number of Episodes", min_value=100, max_value=2000, value=1000, step=100)
-        Q = run_rl_simulation(episodes=episodes)
+        days_per_episode = st.slider("Days per Episode", min_value=10, max_value=60, value=30, step=5)
+        demand_mean = st.number_input("Average Daily Demand", min_value=1, max_value=100, value=20)
+        Q = run_rl_simulation(episodes=episodes, days_per_episode=days_per_episode, demand_mean=demand_mean)
         st.write("Trained Q-Table:")
         q_df = pd.DataFrame(Q, columns=["Order 0", "Order 5", "Order 10", "Order 15"])
         st.dataframe(q_df)
