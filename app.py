@@ -134,11 +134,17 @@ def main():
                 forecast['Type'] = np.where(forecast['ds'] > last_date, 'Forecast', 'Historical')
                 
                 st.subheader("Forecast Chart")
-                fig = px.line(forecast, x='ds', y='yhat', color='Type', 
-                              title='Forecasted Demand (Historical vs. Forecast)',
-                              labels={'ds': 'Date', 'yhat': 'Units Sold (Predicted)'})
+                fig = px.line(
+                forecast,
+                x='ds',
+                y='yhat',
+                color='Type',
+                color_discrete_map={"Historical": "blue", "Forecast": "#00FF00"},
+                title='Forecasted Demand (Historical vs. Forecast)',
+                labels={'ds': 'Date', 'yhat': 'Units Sold (Predicted)'}
+                )
                 st.plotly_chart(fig)
-    
+            
     elif module == "Inventory Optimization":
         st.header("Inventory Optimization")
         st.write("For the selected store, product, and region, compute reorder quantities based on current inventory and forecasted demand.")
