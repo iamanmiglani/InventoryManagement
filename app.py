@@ -16,23 +16,34 @@ def load_data(file_path):
     data['Date'] = pd.to_datetime(data['Date'], dayfirst=True)
     return data
 
+# Forecasting function that drops the last record from training
 @st.cache_data(show_spinner=False)
-def forecast_demand(data, store_id, product_id, region, periods=7):
+def forecast_demand(data, store_id, product_id, region, periods=1):
     subset = data[(data['StoreID'] == store_id) & 
                   (data['ProductID'] == product_id) & 
                   (data['Region'] == region)]
-    if subset.empty:
-        st.error("No data available for the selected combination.")
+    if len(subset) < 2:
+        st.error("Not enough data to forecast")
         return None, None
-    # Prepare data for Prophet: rename columns to 'ds' and 'y'
-    df_forecast = subset[['Date', 'UnitsSold']].rename(columns={'Date': 'ds', 'UnitsSold': 'y'})
-    df_forecast['ds'] = pd.to_datetime(df_forecast['ds'])
+    # Remove the last record from training data (simulate unknown UnitsSold for the forecast day)
+    df_train = subset.iloc[:-1]
+    df_train_prophet = df_train[['Date', 'UnitsSold']].rename(columns={'Date': 'ds', 'UnitsSold': 'y'})
+    df_train_prophet['ds'] = pd.to_datetime(df_train_prophet['ds'])
     
     model = Prophet(daily_seasonality=True)
-    model.fit(df_forecast)
+    model.fit(df_train_prophet)
     future = model.make_future_dataframe(periods=periods)
     forecast = model.predict(future)
-    return forecast, df_forecast
+    return forecast, df_train_prophet
+
+# Helper function to extract the forecasted demand (for the next 1 day)
+def get_forecasted_demand(data, store_id, product_id, region):
+    forecast, hist_data = forecast_demand(data, store_id, product_id, region, periods=1)
+    if forecast is None:
+        return None
+    # The forecast for the next day is the last row in the forecast DataFrame
+    forecasted_demand = forecast.iloc[-1]['yhat']
+    return forecasted_demand
 
 # ---------------------------
 # Module 2: Inventory Optimization
@@ -105,7 +116,7 @@ def run_rl_simulation(episodes=1000, days_per_episode=30, demand_mean=20):
 # Main Streamlit App
 # ---------------------------
 def main():
-    st.title("Agentic AI for Retail Inventory Management - V3")
+    st.title("Agentic AI for Retail Inventory Management - V4")
     
     # Load dataset from the 'data' folder
     data_file = "data/inventory_data.csv"
@@ -115,35 +126,32 @@ def main():
     module = st.sidebar.selectbox("Choose a module", 
                                   ["Forecasting", "Inventory Optimization", "Dynamic Pricing", "Reinforcement Learning"])
     
-    # Common filtering parameters for forecast, optimization, and pricing
+    # Common filtering parameters for all modules
     store_id = st.sidebar.selectbox("Select Store", sorted(data['StoreID'].unique()))
     product_id = st.sidebar.selectbox("Select Product", sorted(data['ProductID'].unique()))
     region = st.sidebar.selectbox("Select Region", sorted(data['Region'].unique()))
     
     if module == "Forecasting":
-        st.header("Time Series Demand Forecasting")
-        periods = st.number_input("Forecast Periods (Days)", min_value=1, max_value=30, value=7)
+        st.header("Time Series Demand Forecasting (1-Day Forecast)")
         if st.button("Run Forecast"):
-            forecast, hist_data = forecast_demand(data, store_id, product_id, region, periods)
+            forecast, hist_data = forecast_demand(data, store_id, product_id, region, periods=1)
             if forecast is not None:
                 st.subheader("Forecast Table")
-                st.dataframe(forecast[['ds', 'yhat', 'yhat_lower', 'yhat_upper']].tail(periods))
+                st.dataframe(forecast[['ds', 'yhat', 'yhat_lower', 'yhat_upper']].tail(1))
                 
-                # Get the last historical date from the training data
+                # Determine the last historical date from training data
                 last_date = hist_data['ds'].max()
-                # Label each row as either 'Historical' or 'Forecast'
+                # Label rows as 'Historical' or 'Forecast'
                 forecast['Type'] = np.where(forecast['ds'] > last_date, 'Forecast', 'Historical')
                 
-                # Split the forecast data into historical and forecast parts
+                # Split data for continuous line plotting
                 hist_df = forecast[forecast['Type'] == 'Historical']
                 fcst_df = forecast[forecast['Type'] == 'Forecast']
-                # To join the lines seamlessly, add the last historical point to fcst_df
                 if not fcst_df.empty:
                     last_hist = hist_df.iloc[-1:]
                     fcst_df = pd.concat([last_hist, fcst_df], ignore_index=True)
                 
                 st.subheader("Forecast Chart")
-                # Create continuous traces for historical and forecast data using Plotly Graph Objects
                 fig = go.Figure()
                 fig.add_trace(go.Scatter(
                     x=hist_df['ds'],
@@ -165,30 +173,29 @@ def main():
                 st.plotly_chart(fig)
     
     elif module == "Inventory Optimization":
-        st.header("Inventory Optimization")
-        st.write("For the selected store, product, and region, compute reorder quantities based on current inventory and forecasted demand.")
-        # Filter data for the selected parameters
+        st.header("Inventory Optimization for Forecast Day")
+        # Filter data for selected parameters
         subset = data[(data['StoreID'] == store_id) & 
                       (data['ProductID'] == product_id) & 
                       (data['Region'] == region)]
         if subset.empty:
             st.error("No data available for the selected combination.")
         else:
-            # If DemandForecast is not provided, assume it's equal to UnitsSold
-            if 'DemandForecast' not in subset.columns:
-                subset['DemandForecast'] = subset['UnitsSold']
-            subset['ReorderQuantity'] = subset.apply(lambda row: compute_reorder(row['InventoryLevel'], row['DemandForecast']), axis=1)
-            
-            st.subheader("Inventory Optimization Table")
-            st.dataframe(subset[['Date', 'StoreID', 'ProductID', 'Region', 'InventoryLevel', 'DemandForecast', 'ReorderQuantity']].head(10))
-            
-            st.subheader("Inventory Levels Chart")
-            fig = px.line(subset, x='Date', y='InventoryLevel', title='Historical Inventory Levels')
-            st.plotly_chart(fig)
+            # Get forecasted demand for the target (last) day using our new function
+            forecasted_demand = get_forecasted_demand(data, store_id, product_id, region)
+            if forecasted_demand is None:
+                st.error("Forecast could not be generated.")
+            else:
+                # Use the last row of the filtered data as the target record
+                target_row = subset.iloc[-1].copy()
+                target_row['DemandForecast'] = forecasted_demand
+                target_row['ReorderQuantity'] = compute_reorder(target_row['InventoryLevel'], target_row['DemandForecast'])
+                
+                st.subheader("Optimized Inventory for Forecast Day")
+                st.write(target_row[['Date', 'StoreID', 'ProductID', 'Region', 'InventoryLevel', 'DemandForecast', 'ReorderQuantity']])
     
     elif module == "Dynamic Pricing":
-        st.header("Dynamic Pricing")
-        st.write("For the selected store, product, and region, dynamic pricing is computed based on inventory vs. forecasted demand.")
+        st.header("Dynamic Pricing for Forecast Day")
         # Filter data for the selected parameters
         subset = data[(data['StoreID'] == store_id) & 
                       (data['ProductID'] == product_id) & 
@@ -199,15 +206,16 @@ def main():
             if 'Price' not in subset.columns:
                 st.error("Price column not found in dataset. Please add a 'Price' field to your CSV.")
             else:
-                if 'DemandForecast' not in subset.columns:
-                    subset['DemandForecast'] = subset['UnitsSold']
-                subset['DynamicPrice'] = subset.apply(lambda row: dynamic_price(row['Price'], row['InventoryLevel'], row['DemandForecast']), axis=1)
-                st.subheader("Dynamic Pricing Table")
-                st.dataframe(subset[['Date', 'StoreID', 'ProductID', 'Region', 'Price', 'DynamicPrice']].head(10))
-                
-                st.subheader("Dynamic Pricing Chart")
-                fig = px.line(subset, x='Date', y='DynamicPrice', title='Dynamic Pricing Over Time')
-                st.plotly_chart(fig)
+                forecasted_demand = get_forecasted_demand(data, store_id, product_id, region)
+                if forecasted_demand is None:
+                    st.error("Forecast could not be generated.")
+                else:
+                    target_row = subset.iloc[-1].copy()
+                    target_row['DemandForecast'] = forecasted_demand
+                    target_row['DynamicPrice'] = dynamic_price(target_row['Price'], target_row['InventoryLevel'], target_row['DemandForecast'])
+                    
+                    st.subheader("Dynamic Pricing for Forecast Day")
+                    st.write(target_row[['Date', 'StoreID', 'ProductID', 'Region', 'Price', 'DynamicPrice']])
     
     elif module == "Reinforcement Learning":
         st.header("Reinforcement Learning Simulation")
