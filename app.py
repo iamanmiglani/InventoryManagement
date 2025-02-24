@@ -1,3 +1,4 @@
+# data['Date'] = pd.to_datetime(data['Date'], dayfirst=True)
 import streamlit as st
 import pandas as pd
 import numpy as np
@@ -12,19 +13,20 @@ import datetime
 @st.cache_data(show_spinner=False)
 def load_data(file_path):
     data = pd.read_csv(file_path)
-    # data['Date'] = pd.to_datetime(data['Date'])
+    # Adjust the date parsing as needed; here we assume day-first format if necessary.
     data['Date'] = pd.to_datetime(data['Date'], dayfirst=True)
-
     return data
 
 @st.cache_data(show_spinner=False)
 def forecast_demand(data, store_id, product_id, region, periods=7):
+    # Filter data for the selected store, product, and region
     subset = data[(data['StoreID'] == store_id) & 
                   (data['ProductID'] == product_id) & 
                   (data['Region'] == region)]
     if subset.empty:
         st.error("No data available for the selected combination.")
         return None
+    # Prepare data for Prophet (needs columns 'ds' and 'y')
     df_forecast = subset[['Date', 'UnitsSold']].rename(columns={'Date': 'ds', 'UnitsSold': 'y'})
     model = Prophet(daily_seasonality=True)
     model.fit(df_forecast)
@@ -53,7 +55,7 @@ def dynamic_price(current_price, inventory_level, demand_forecast):
     return current_price
 
 # ---------------------------
-# Module 5: Reinforcement Learning (RL) Simulation
+# Module 5: Reinforcement Learning (RL) Simulation (Unchanged)
 # ---------------------------
 @st.cache_data(show_spinner=False)
 def run_rl_simulation(episodes=1000, days_per_episode=30, demand_mean=20):
@@ -111,43 +113,55 @@ def main():
     
     st.sidebar.header("Modules")
     module = st.sidebar.selectbox("Choose a module", 
-                                  ["Forecasting", "Inventory Optimization", "Dynamic Pricing", "Reinforcement Learning"])
+                                  ["Forecasting & Optimization", "Reinforcement Learning"])
     
-    if module == "Forecasting":
-        st.header("Time Series Demand Forecasting")
+    if module == "Forecasting & Optimization":
+        st.header("Forecasting, Inventory Optimization & Dynamic Pricing")
+        
+        # User selections
         store_id = st.selectbox("Select Store", sorted(data['StoreID'].unique()))
         product_id = st.selectbox("Select Product", sorted(data['ProductID'].unique()))
         region = st.selectbox("Select Region", sorted(data['Region'].unique()))
         periods = st.number_input("Forecast Periods (Days)", min_value=1, max_value=30, value=7)
-        if st.button("Run Forecast"):
-            forecast = forecast_demand(data, store_id, product_id, region, periods)
-            if forecast is not None:
-                st.write("Forecasted Demand:")
-                st.dataframe(forecast[['ds', 'yhat', 'yhat_lower', 'yhat_upper']].tail(periods))
-                fig = px.line(forecast, x='ds', y='yhat', title='Forecasted Demand')
-                st.plotly_chart(fig)
-    
-    elif module == "Inventory Optimization":
-        st.header("Inventory Optimization")
-        st.write("Computed Reorder Quantities Based on Current Inventory vs. Forecasted Demand")
-        if 'DemandForecast' not in data.columns:
-            data['DemandForecast'] = data['UnitsSold']
-        data['ReorderQuantity'] = data.apply(lambda row: compute_reorder(row['InventoryLevel'], row['DemandForecast']), axis=1)
-        st.dataframe(data[['StoreID', 'ProductID', 'Region', 'InventoryLevel', 'DemandForecast', 'ReorderQuantity']].head(10))
-    
-    elif module == "Dynamic Pricing":
-        st.header("Dynamic Pricing")
-        st.write("Dynamic Price Adjustments Based on Inventory Levels")
-        if 'Price' not in data.columns:
-            st.error("Price column not found in dataset. Please add a 'Price' field to your CSV.")
+        
+        # Filter data for the selected store, product, and region
+        filtered_data = data[(data['StoreID'] == store_id) & 
+                             (data['ProductID'] == product_id) & 
+                             (data['Region'] == region)]
+        if filtered_data.empty:
+            st.error("No data available for the selected combination.")
         else:
-            if 'DemandForecast' not in data.columns:
-                data['DemandForecast'] = data['UnitsSold']
-            data['DynamicPrice'] = data.apply(lambda row: dynamic_price(row['Price'], row['InventoryLevel'], row['DemandForecast']), axis=1)
-            st.dataframe(data[['StoreID', 'ProductID', 'Region', 'Price', 'DynamicPrice']].head(10))
-            fig = px.line(data, x='Date', y='DynamicPrice', title='Dynamic Pricing Over Time')
-            st.plotly_chart(fig)
-    
+            if st.button("Run Forecast and Optimize"):
+                # --- Forecasting ---
+                forecast = forecast_demand(data, store_id, product_id, region, periods)
+                if forecast is not None:
+                    st.subheader("Forecasted Demand")
+                    st.dataframe(forecast[['ds', 'yhat', 'yhat_lower', 'yhat_upper']].tail(periods))
+                    fig = px.line(forecast, x='ds', y='yhat', title='Forecasted Demand')
+                    st.plotly_chart(fig)
+                    
+                    # Use the last forecast value as a representative forecast for optimization/pricing
+                    forecasted_demand = forecast['yhat'].iloc[-1]
+                    st.write(f"Using forecasted demand: {forecasted_demand:.2f} units for optimization.")
+                    
+                    # --- Inventory Optimization ---
+                    # Create a copy to avoid modifying the original filtered data
+                    opt_data = filtered_data.copy()
+                    opt_data['DemandForecast'] = forecasted_demand
+                    opt_data['ReorderQuantity'] = opt_data.apply(lambda row: compute_reorder(row['InventoryLevel'], row['DemandForecast']), axis=1)
+                    st.subheader("Inventory Optimization")
+                    st.dataframe(opt_data[['StoreID', 'ProductID', 'Region', 'InventoryLevel', 'DemandForecast', 'ReorderQuantity']])
+                    
+                    # --- Dynamic Pricing ---
+                    if 'Price' not in opt_data.columns:
+                        st.error("Price column not found in dataset. Please add a 'Price' field to your CSV.")
+                    else:
+                        opt_data['DynamicPrice'] = opt_data.apply(lambda row: dynamic_price(row['Price'], row['InventoryLevel'], row['DemandForecast']), axis=1)
+                        st.subheader("Dynamic Pricing")
+                        st.dataframe(opt_data[['StoreID', 'ProductID', 'Region', 'Price', 'DynamicPrice']])
+                        fig_price = px.line(opt_data, x='Date', y='DynamicPrice', title='Dynamic Pricing Over Time')
+                        st.plotly_chart(fig_price)
+                        
     elif module == "Reinforcement Learning":
         st.header("Reinforcement Learning Simulation")
         episodes = st.slider("Number of Episodes", min_value=100, max_value=2000, value=1000, step=100)
