@@ -16,16 +16,30 @@ def load_data(file_path):
     data['Date'] = pd.to_datetime(data['Date'], dayfirst=True)
     return data
 
-# Forecasting function that drops the last record from training
+# Forecasting function that aggregates data if "All" regions is selected,
+# and removes the last record so that a forecast is generated for that day.
 @st.cache_data(show_spinner=False)
 def forecast_demand(data, store_id, product_id, region, periods=1):
-    subset = data[(data['StoreID'] == store_id) & 
-                  (data['ProductID'] == product_id) & 
-                  (data['Region'] == region)]
+    if region == "All":
+        # Filter for selected store and product only
+        subset = data[(data['StoreID'] == store_id) & (data['ProductID'] == product_id)]
+        # Aggregate across all regions by grouping by date.
+        # For UnitsSold and InventoryLevel, we sum; for Price, we average.
+        subset = subset.groupby("Date", as_index=False).agg({
+            "UnitsSold": "sum",
+            "InventoryLevel": "sum",
+            "Price": "mean"  # if Price exists
+        })
+    else:
+        subset = data[(data['StoreID'] == store_id) & 
+                      (data['ProductID'] == product_id) & 
+                      (data['Region'] == region)]
+    
     if len(subset) < 2:
         st.error("Not enough data to forecast")
         return None, None
-    # Remove the last record from training data (simulate unknown UnitsSold for the forecast day)
+    
+    # Remove the last record to simulate forecasting that day's demand.
     df_train = subset.iloc[:-1]
     df_train_prophet = df_train[['Date', 'UnitsSold']].rename(columns={'Date': 'ds', 'UnitsSold': 'y'})
     df_train_prophet['ds'] = pd.to_datetime(df_train_prophet['ds'])
@@ -116,7 +130,7 @@ def run_rl_simulation(episodes=1000, days_per_episode=30, demand_mean=20):
 # Main Streamlit App
 # ---------------------------
 def main():
-    st.title("Agentic AI for Retail Inventory Management - V4")
+    st.title("Agentic AI for Retail Inventory Management - V5")
     
     # Load dataset from the 'data' folder
     data_file = "data/inventory_data.csv"
@@ -129,7 +143,10 @@ def main():
     # Common filtering parameters for all modules
     store_id = st.sidebar.selectbox("Select Store", sorted(data['StoreID'].unique()))
     product_id = st.sidebar.selectbox("Select Product", sorted(data['ProductID'].unique()))
-    region = st.sidebar.selectbox("Select Region", sorted(data['Region'].unique()))
+    # Add an option "All" for region
+    regions = sorted(data['Region'].unique())
+    regions.insert(0, "All")
+    region = st.sidebar.selectbox("Select Region", regions)
     
     if module == "Forecasting":
         st.header("Time Series Demand Forecasting (1-Day Forecast)")
@@ -139,7 +156,7 @@ def main():
                 st.subheader("Forecast Table")
                 st.dataframe(forecast[['ds', 'yhat', 'yhat_lower', 'yhat_upper']].tail(1))
                 
-                # Determine the last historical date from training data
+                # Determine the last historical date from the training data
                 last_date = hist_data['ds'].max()
                 # Label rows as 'Historical' or 'Forecast'
                 forecast['Type'] = np.where(forecast['ds'] > last_date, 'Forecast', 'Historical')
@@ -148,6 +165,7 @@ def main():
                 hist_df = forecast[forecast['Type'] == 'Historical']
                 fcst_df = forecast[forecast['Type'] == 'Forecast']
                 if not fcst_df.empty:
+                    # Prepend the last historical point to ensure the lines join seamlessly.
                     last_hist = hist_df.iloc[-1:]
                     fcst_df = pd.concat([last_hist, fcst_df], ignore_index=True)
                 
@@ -168,38 +186,54 @@ def main():
                         name='Forecast',
                         line=dict(color='#00FF00', dash='dash')
                     ))
-                fig.update_layout(title='Forecasted Demand (Historical Joined with Forecast)',
+                fig.update_layout(title='Forecasted Demand (Aggregated for All Regions)' if region=="All" 
+                                  else 'Forecasted Demand',
                                   xaxis_title='Date', yaxis_title='Units Sold (Predicted)')
                 st.plotly_chart(fig)
     
     elif module == "Inventory Optimization":
         st.header("Inventory Optimization for Forecast Day")
-        # Filter data for selected parameters
-        subset = data[(data['StoreID'] == store_id) & 
-                      (data['ProductID'] == product_id) & 
-                      (data['Region'] == region)]
+        # If "All" regions are selected, aggregate the data.
+        if region == "All":
+            subset = data[(data['StoreID'] == store_id) & (data['ProductID'] == product_id)]
+            subset = subset.groupby("Date", as_index=False).agg({
+                "UnitsSold": "sum",
+                "InventoryLevel": "sum",
+                "Price": "mean"
+            })
+        else:
+            subset = data[(data['StoreID'] == store_id) & 
+                          (data['ProductID'] == product_id) & 
+                          (data['Region'] == region)]
         if subset.empty:
             st.error("No data available for the selected combination.")
         else:
-            # Get forecasted demand for the target (last) day using our new function
+            # Get forecasted demand for the target day using the helper function
             forecasted_demand = get_forecasted_demand(data, store_id, product_id, region)
             if forecasted_demand is None:
                 st.error("Forecast could not be generated.")
             else:
-                # Use the last row of the filtered data as the target record
+                # Use the last available aggregated record as the target
                 target_row = subset.iloc[-1].copy()
                 target_row['DemandForecast'] = forecasted_demand
                 target_row['ReorderQuantity'] = compute_reorder(target_row['InventoryLevel'], target_row['DemandForecast'])
                 
                 st.subheader("Optimized Inventory for Forecast Day")
-                st.write(target_row[['Date', 'StoreID', 'ProductID', 'Region', 'InventoryLevel', 'DemandForecast', 'ReorderQuantity']])
+                st.write(target_row[['Date', 'StoreID', 'ProductID', 'InventoryLevel', 'DemandForecast', 'ReorderQuantity']])
     
     elif module == "Dynamic Pricing":
         st.header("Dynamic Pricing for Forecast Day")
-        # Filter data for the selected parameters
-        subset = data[(data['StoreID'] == store_id) & 
-                      (data['ProductID'] == product_id) & 
-                      (data['Region'] == region)]
+        if region == "All":
+            subset = data[(data['StoreID'] == store_id) & (data['ProductID'] == product_id)]
+            subset = subset.groupby("Date", as_index=False).agg({
+                "UnitsSold": "sum",
+                "InventoryLevel": "sum",
+                "Price": "mean"
+            })
+        else:
+            subset = data[(data['StoreID'] == store_id) & 
+                          (data['ProductID'] == product_id) & 
+                          (data['Region'] == region)]
         if subset.empty:
             st.error("No data available for the selected combination.")
         else:
@@ -215,7 +249,7 @@ def main():
                     target_row['DynamicPrice'] = dynamic_price(target_row['Price'], target_row['InventoryLevel'], target_row['DemandForecast'])
                     
                     st.subheader("Dynamic Pricing for Forecast Day")
-                    st.write(target_row[['Date', 'StoreID', 'ProductID', 'Region', 'Price', 'DynamicPrice']])
+                    st.write(target_row[['Date', 'StoreID', 'ProductID', 'Price', 'DynamicPrice']])
     
     elif module == "Reinforcement Learning":
         st.header("Reinforcement Learning Simulation")
