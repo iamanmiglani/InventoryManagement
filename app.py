@@ -193,7 +193,11 @@ def main():
                 target_row['ReorderQuantity'] = compute_reorder(target_row['InventoryLevel'], target_row['DemandForecast'])
                 
                 st.subheader("Optimized Inventory for Forecast Day")
-                st.write(target_row[['Date', 'StoreID', 'ProductID', 'Region', 'InventoryLevel', 'DemandForecast', 'ReorderQuantity']])
+                # Convert the record to a DataFrame for styling
+                df_inv = pd.DataFrame([target_row])
+                # Highlight the ReorderQuantity column
+                df_inv_styled = df_inv.style.applymap(lambda v: 'background-color: yellow; font-weight: bold;', subset=['ReorderQuantity'])
+                st.dataframe(df_inv_styled)
     
     elif module == "Dynamic Pricing":
         st.header("Dynamic Pricing for Forecast Day")
@@ -216,7 +220,10 @@ def main():
                     target_row['DynamicPrice'] = dynamic_price(target_row['Price'], target_row['InventoryLevel'], target_row['DemandForecast'])
                     
                     st.subheader("Dynamic Pricing for Forecast Day")
-                    st.write(target_row[['Date', 'StoreID', 'ProductID', 'Region', 'Price', 'DynamicPrice']])
+                    df_price = pd.DataFrame([target_row])
+                    # Highlight the DynamicPrice column
+                    df_price_styled = df_price.style.applymap(lambda v: 'background-color: lightgreen; font-weight: bold;', subset=['DynamicPrice'])
+                    st.dataframe(df_price_styled)
     
     elif module == "Reinforcement Learning":
         st.header("Reinforcement Learning Simulation")
