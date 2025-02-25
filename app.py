@@ -70,7 +70,7 @@ with open("trained_q_table.pkl", "rb") as f:
 # Streamlit App UI (V7)
 # ---------------------------
 st.title("Integrated RL-Driven Retail Inventory & Pricing Decisions (V7)")
-st.markdown("**Fixed Set:** StoreID: 001, ProductID: 101, Region: North")
+st.markdown("**Fixed Set:** StoreID: S001, ProductID: P0015, Region: East")
 
 # Load data from CSV (update the path if necessary)
 data = load_data("data/inventory_data.csv")
@@ -79,26 +79,27 @@ data = load_data("data/inventory_data.csv")
 # Historical period: Jan 2022 - June 30, 2023
 train_end = pd.to_datetime("2023-06-30")
 training_data = data[(data['Date'] <= train_end) &
-                     (data['StoreID'] == "001") &
-                     (data['ProductID'] == "101") &
-                     (data['Region'] == "North")].copy()
+                     (data['StoreID'] == "S001") &
+                     (data['ProductID'] == "P0015") &
+                     (data['Region'] == "East")].copy()
 
 # New datapoints (simulation period): use all rows after June 30, 2023
 new_data = data[(data['Date'] > train_end) &
-                (data['StoreID'] == "001") &
-                (data['ProductID'] == "101") &
-                (data['Region'] == "North")].copy().sort_values("Date")
+                (data['StoreID'] == "S001") &
+                (data['ProductID'] == "P0015") &
+                (data['Region'] == "East")].copy().sort_values("Date")
 # For testing, we will use only the first 10 new datapoints
 new_data = new_data.head(10)
 
-# Let user select which simulation day (by index) to test
+# Check if new_data has any rows
+if new_data.empty:
+    st.error("No new datapoints available for simulation.")
+    st.stop()
+
+# Let user select which simulation day (by index) to test.
 max_days = len(new_data)
 day_index = st.slider("Select Simulation Day (1 to {})".format(max_days), 
                       min_value=1, max_value=max_days, value=1)
-
-if day_index > max_days:
-    st.error("Selected day exceeds available new datapoints.")
-    st.stop()
 
 sim_row = new_data.iloc[day_index - 1]
 
@@ -172,4 +173,4 @@ st.markdown(f"**Holding Cost:** {holding_cost:.2f}")
 st.markdown(f"**Reward:** **{reward:.2f}**")
 
 st.markdown("---")
-st.markdown("This simulation integrates the RL layer (using a pre-trained Q-table) with forecasting, inventory optimization, and dynamic pricing. It uses new datapoints (picked via the Date column) to test accuracy and performance in a real-time–like setting. When deployed via Streamlit and GitHub, this integrated approach will allow the RL agent's decisions to influence operations continuously.")
+st.markdown("This simulation integrates the RL layer (using a pre-trained Q-table) with forecasting, inventory optimization, and dynamic pricing. It uses new datapoints (picked via the Date column) to test forecast accuracy and operational performance in a real-time-like setting.")
