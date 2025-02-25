@@ -67,51 +67,47 @@ with open("trained_q_table.pkl", "rb") as f:
     Q = pickle.load(f)
 
 # ---------------------------
-# Streamlit App UI (V7)
+# Streamlit App UI (V7.1)
 # ---------------------------
-st.title("Integrated RL-Driven Retail Inventory & Pricing Decisions (V7)")
+st.title("Integrated RL-Driven Retail Inventory & Pricing Decisions (V7.1)")
 st.markdown("**Fixed Set:** StoreID: S001, ProductID: P0015, Region: East")
 
 # Load data from CSV (update the path if necessary)
 data = load_data("data/inventory_data.csv")
 
-# Split data into historical (training) and new datapoints for simulation:
-# Historical period: Jan 2022 - June 30, 2023
-train_end = pd.to_datetime("2023-06-30")
+# Define training period: all data up to November 30, 2023
+train_end = pd.to_datetime("2023-11-30")
 training_data = data[(data['Date'] <= train_end) &
                      (data['StoreID'] == "S001") &
                      (data['ProductID'] == "P0015") &
                      (data['Region'] == "East")].copy()
 
-# New datapoints (simulation period): use all rows after June 30, 2023
+# New datapoints (simulation period): all rows after November 30, 2023
 new_data = data[(data['Date'] > train_end) &
                 (data['StoreID'] == "S001") &
                 (data['ProductID'] == "P0015") &
                 (data['Region'] == "East")].copy().sort_values("Date")
-# For testing, we will use only the first 10 new datapoints
-new_data = new_data.head(10)
 
-# Check if new_data has any rows
 if new_data.empty:
-    st.error("No new datapoints available for simulation.")
+    st.error("No new datapoints available for simulation (dates after November 30, 2023).")
     st.stop()
 
-# Let user select which simulation day (by index) to test.
-max_days = len(new_data)
-day_index = st.slider("Select Simulation Day (1 to {})".format(max_days), 
-                      min_value=1, max_value=max_days, value=1)
+# Let user select a simulation date (from the available new datapoints)
+sim_dates = sorted(new_data['Date'].dt.date.unique().tolist())
+selected_date = st.selectbox("Select Simulation Date", sim_dates)
 
-sim_row = new_data.iloc[day_index - 1]
+# Select the first row for the selected simulation date
+sim_row = new_data[new_data['Date'].dt.date == selected_date].iloc[0]
 
-# Current operational parameters come from the last historical record:
+# Current operational parameters come from the last historical record
 current_inventory = training_data.iloc[-1]['InventoryLevel']
 current_price = training_data.iloc[-1]['Price']
 
 st.markdown(f"**Starting Inventory:** {current_inventory}")
 st.markdown(f"**Starting Price:** {current_price}")
 
-# Combine training data with new datapoints up to the day before current simulation day:
-available_data = pd.concat([training_data, new_data[new_data['Date'] < sim_row['Date']]])
+# Combine training data with new datapoints up to the day before the selected simulation date
+available_data = pd.concat([training_data, new_data[new_data['Date'] < pd.to_datetime(selected_date)]])
 available_data = available_data.sort_values("Date")
 
 # Prepare data for Prophet training
@@ -138,7 +134,7 @@ order_qty, price_adj = select_rl_action(Q, state)
 new_inventory = current_inventory + order_qty   # inventory after order arrives
 new_price = current_price * price_adj             # adjusted price
 
-# Get actual demand for simulation day (from new_data)
+# Get actual demand for the simulation date (from new_data)
 actual_demand = sim_row['UnitsSold']
 
 # Compute sales, ending inventory, revenue, and costs
@@ -157,7 +153,7 @@ forecast_percentage_error = (forecast_error / actual_demand * 100) if actual_dem
 # Display Results Vertically (Key-Value Format)
 # ---------------------------
 st.header("Simulation Results for Selected Day")
-st.markdown(f"**Simulation Date:** {sim_row['Date'].date()}")
+st.markdown(f"**Simulation Date:** {selected_date}")
 st.markdown(f"**Forecasted Demand for Next Day:** {forecasted_demand:.2f}")
 st.markdown(f"**Forecast Error:** {forecast_error:.2f} units ({forecast_percentage_error:.2f}%)")
 st.markdown(f"**Current Inventory:** {current_inventory}")
@@ -173,4 +169,4 @@ st.markdown(f"**Holding Cost:** {holding_cost:.2f}")
 st.markdown(f"**Reward:** **{reward:.2f}**")
 
 st.markdown("---")
-st.markdown("This simulation integrates the RL layer (using a pre-trained Q-table) with forecasting, inventory optimization, and dynamic pricing. It uses new datapoints (picked via the Date column) to test forecast accuracy and operational performance in a real-time-like setting.")
+st.markdown("This simulation integrates the RL layer (using a pre-trained Q-table) with forecasting, inventory optimization, and dynamic pricing. It uses new datapoints (selected by date from those after November 30, 2023) to test forecast accuracy and operational performance in a real-time–like setting.")
